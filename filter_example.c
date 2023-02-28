@@ -171,30 +171,6 @@ void execute_example(char* input_data, const size_t in_bytes)
 
 
 
-// int main()
-// {
-//   // Initialize a random array of chars
-//   const size_t in_bytes = 1000000;
-//   char* uncompressed_data;
-//
-//   cudaMallocHost((void**) &uncompressed_data, in_bytes);
-//
-//   std::mt19937 random_gen(42);
-//
-//   // char specialization of std::uniform_int_distribution is
-//   // non-standard, and isn't available on MSVC, so use short instead,
-//   // but with the range limited, and then cast below.
-//   std::uniform_int_distribution<short> uniform_dist(0, 255);
-//   for (size_t ix = 0; ix < in_bytes; ++ix) {
-//     uncompressed_data[ix] = static_cast<char>(uniform_dist(random_gen));
-//   }
-//
-//   execute_example(uncompressed_data, in_bytes);
-//   return 0;
-//
-// }
-
-
 
 size_t md5_filter(unsigned int flags, size_t cd_nelmts,
                   const unsigned int cd_values[], size_t nbytes,
@@ -237,27 +213,4 @@ size_t md5_filter(unsigned int flags, size_t cd_nelmts,
 #else
   return 0; /*fail*/
 #endif
-}
-
-
-
-int main (int argc, char **argv)
-{
-  printf("Hello, world!\n");
-
-  // Initialize a random array of chars
-  const size_t in_bytes = 1000000;
-
-  char* uncompressed_data;
-
-  cudaMallocHost((void**) &uncompressed_data, in_bytes);
-
-  for (size_t ix = 0; ix < in_bytes; ++ix) {
-    uncompressed_data[ix] = (char) rand() % CHAR_MAX;
-    //printf("uncompressed_data[%d]=%d\n", ix, uncompressed_data[ix]);
-  }
-
-  execute_example(uncompressed_data, in_bytes);
-
-  return 0;
 }
