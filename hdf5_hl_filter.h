@@ -22,12 +22,12 @@
     }                                                                     \
   } while (false)
 
-void decomp_compressed_with_manager_factory_example(uint8_t* device_input_ptrs, const size_t input_buffer_len);
-void comp_decomp_with_single_manager(uint8_t* device_input_ptrs, const size_t input_buffer_len);
-void multi_comp_decomp_example(const std::vector<uint8_t*>& device_input_ptrs, std::vector<size_t>& input_buffer_lengths);
-void multi_comp_decomp_example_comp_config(const std::vector<uint8_t*>& device_input_ptrs, std::vector<size_t>& input_buffer_lengths);
-void comp_decomp_with_single_manager_with_checksums(uint8_t* device_input_ptrs, const size_t input_buffer_len);
-void decomp_compressed_with_manager_factory_with_checksums(uint8_t* device_input_ptrs, const size_t input_buffer_len);
+#define NVCOMP_FILTER_IDX 305;
 
+void register_nvcomp_filter();
 
+void decomp_compressed_with_manager_factory_example(uint8_t* input_buf, const size_t input_buffer_len);
+
+size_t nvcomp_filter( unsigned int flags, size_t cd_nelmts, const unsigned int cd_values[],
+                      size_t nbytes, size_t *buf_size, void **buf);
 #endif // #define HDF5_HL_FILTER_H

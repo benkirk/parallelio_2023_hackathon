@@ -90,6 +90,7 @@ void register_trivial_filter()
 #ifdef COMPILE_MAIN
 int main (int argc, char** argv)
 {
+  printf("registering trivial HDF5 filter...\n");
   register_trivial_filter();
 
   return 0;

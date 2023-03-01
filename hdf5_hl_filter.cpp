@@ -34,6 +34,12 @@
 #include "nvcomp.hpp"
 #include "nvcomp/nvcompManagerFactory.hpp"
 
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <hdf5.h>
+#include <H5Zpublic.h>
+
+
 #include "hdf5_hl_filter.h"
 
 using namespace nvcomp;
@@ -108,278 +114,95 @@ void decomp_compressed_with_manager_factory_example(uint8_t* device_input_ptrs, 
   CUDA_CHECK(cudaStreamDestroy(stream));
 }
 
-/**
- * In this example, we:
- *  1) construct an nvcompManager
- *  2) compress the input data
- *  3) decompress the input data
- */
-void comp_decomp_with_single_manager(uint8_t* device_input_ptrs, const size_t input_buffer_len)
+
+
+bool nvc_is_device_pointer (const void *ptr)
 {
-  cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
-  const int chunk_size = 1 << 16;
-  nvcompType_t data_type = NVCOMP_TYPE_CHAR;
-
-  LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
-  CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
-
-  uint8_t* comp_buffer;
-  CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
-
-  nvcomp_manager.compress(device_input_ptrs, comp_buffer, comp_config);
-
-  DecompressionConfig decomp_config = nvcomp_manager.configure_decompression(comp_buffer);
-  uint8_t* res_decomp_buffer;
-  CUDA_CHECK(cudaMalloc(&res_decomp_buffer, decomp_config.decomp_data_size));
-
-  nvcomp_manager.decompress(res_decomp_buffer, comp_buffer, decomp_config);
-
-  CUDA_CHECK(cudaStreamSynchronize(stream));
-
-  CUDA_CHECK(cudaFree(comp_buffer));
-  CUDA_CHECK(cudaFree(res_decomp_buffer));
-
-  CUDA_CHECK(cudaStreamDestroy(stream));
-}
-
-/**
- * Additionally, we can use the same manager to execute multiple streamed compressions / decompressions
- * In this example we configure the multiple decompressions by inspecting the compressed buffers
- */
-void multi_comp_decomp_example(const std::vector<uint8_t*>& device_input_ptrs, std::vector<size_t>& input_buffer_lengths)
-{
-  size_t num_buffers = input_buffer_lengths.size();
-
-  using namespace std;
-
-  cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
-  const int chunk_size = 1 << 16;
-  nvcompType_t data_type = NVCOMP_TYPE_CHAR;
-
-  LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
-
-  std::vector<uint8_t*> comp_result_buffers(num_buffers);
-
-  for(size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    uint8_t* input_data = device_input_ptrs[ix_buffer];
-    size_t input_length = input_buffer_lengths[ix_buffer];
-
-    auto comp_config = nvcomp_manager.configure_compression(input_length);
-
-    CUDA_CHECK(cudaMalloc(&comp_result_buffers[ix_buffer], comp_config.max_compressed_buffer_size));
-    nvcomp_manager.compress(input_data, comp_result_buffers[ix_buffer], comp_config);
-  }
-
-  std::vector<uint8_t*> decomp_result_buffers(num_buffers);
-  for(size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    uint8_t* comp_data = comp_result_buffers[ix_buffer];
-
-    auto decomp_config = nvcomp_manager.configure_decompression(comp_data);
-
-    CUDA_CHECK(cudaMalloc(&decomp_result_buffers[ix_buffer], decomp_config.decomp_data_size));
-
-    nvcomp_manager.decompress(decomp_result_buffers[ix_buffer], comp_data, decomp_config);
-  }
-
-  for (size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    CUDA_CHECK(cudaFree(decomp_result_buffers[ix_buffer]));
-    CUDA_CHECK(cudaFree(comp_result_buffers[ix_buffer]));
-  }
-}
-
-/**
- * Additionally, we can use the same manager to execute multiple streamed compressions / decompressions
- * In this example we configure the multiple decompressions by storing the comp_config's and inspecting those
- */
-void multi_comp_decomp_example_comp_config(const std::vector<uint8_t*>& device_input_ptrs, std::vector<size_t>& input_buffer_lengths)
-{
-  size_t num_buffers = input_buffer_lengths.size();
-
-  cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
-  const int chunk_size = 1 << 16;
-  nvcompType_t data_type = NVCOMP_TYPE_CHAR;
-
-  LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
-
-  std::vector<CompressionConfig> comp_configs;
-  comp_configs.reserve(num_buffers);
-
-  std::vector<uint8_t*> comp_result_buffers(num_buffers);
-
-  for(size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    uint8_t* input_data = device_input_ptrs[ix_buffer];
-    size_t input_length = input_buffer_lengths[ix_buffer];
-
-    comp_configs.push_back(nvcomp_manager.configure_compression(input_length));
-    auto& comp_config = comp_configs.back();
-
-    CUDA_CHECK(cudaMalloc(&comp_result_buffers[ix_buffer], comp_config.max_compressed_buffer_size));
-
-    nvcomp_manager.compress(input_data, comp_result_buffers[ix_buffer], comp_config);
-  }
-
-  std::vector<uint8_t*> decomp_result_buffers(num_buffers);
-  for(size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    auto decomp_config = nvcomp_manager.configure_decompression(comp_configs[ix_buffer]);
-
-    CUDA_CHECK(cudaMalloc(&decomp_result_buffers[ix_buffer], decomp_config.decomp_data_size));
-
-    nvcomp_manager.decompress(decomp_result_buffers[ix_buffer], comp_result_buffers[ix_buffer], decomp_config);
-  }
-
-  for (size_t ix_buffer = 0; ix_buffer < num_buffers; ++ix_buffer) {
-    CUDA_CHECK(cudaFree(decomp_result_buffers[ix_buffer]));
-    CUDA_CHECK(cudaFree(comp_result_buffers[ix_buffer]));
-  }
-}
-
-/**
- * In this example, we:
- *  1) construct an nvcompManager with checksum support enabled
- *  2) compress the input data
- *  3) decompress the input data
- */
-void comp_decomp_with_single_manager_with_checksums(uint8_t* device_input_ptrs, const size_t input_buffer_len)
-{
-  cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
-  const int chunk_size = 1 << 16;
-  nvcompType_t data_type = NVCOMP_TYPE_CHAR;
-
-  /*
-   * There are 5 possible modes for checksum processing as
-   * described below.
-   *
-   * Mode: NoComputeNoVerify
-   * Description:
-   *   - During compression, do not compute checksums
-   *   - During decompression, do not verify checksums
-   *
-   * Mode: ComputeAndNoVerify
-   * Description:
-   *   - During compression, compute checksums
-   *   - During decompression, do not attempt to verify checksums
-   *
-   * Mode: NoComputeAndVerifyIfPresent
-   * Description:
-   *   - During compression, do not compute checksums
-   *   - During decompression, verify checksums if they were included
-   *
-   * Mode: ComputeAndVerifyIfPresent
-   * Description:
-   *   - During compression, compute checksums
-   *   - During decompression, verify checksums if they were included
-   *
-   * Mode: ComputeAndVerify
-   * Description:
-   *   - During compression, compute checksums
-   *   - During decompression, verify checksums. A runtime error will be
-   *     thrown upon configure_decompression if checksums were not
-   *     included in the compressed buffer.
-   */
-
-  int gpu_num = 0;
-
-  // manager constructed with checksum mode as final argument
-  LZ4Manager nvcomp_manager{chunk_size, data_type, stream, gpu_num, ComputeAndVerify};
-  CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
-
-  uint8_t* comp_buffer;
-  CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
-
-  // Checksums are computed and stored for uncompressed and compressed buffers during compression
-  nvcomp_manager.compress(device_input_ptrs, comp_buffer, comp_config);
-
-  DecompressionConfig decomp_config = nvcomp_manager.configure_decompression(comp_buffer);
-  uint8_t* res_decomp_buffer;
-  CUDA_CHECK(cudaMalloc(&res_decomp_buffer, decomp_config.decomp_data_size));
-
-  // Checksums are computed for compressed and decompressed buffers and verified against those
-  // stored during compression
-  nvcomp_manager.decompress(res_decomp_buffer, comp_buffer, decomp_config);
-
-  CUDA_CHECK(cudaStreamSynchronize(stream));
-
-  /*
-   * After synchronizing the stream, the nvcomp status can be checked to see if
-   * the checksums were successfully verified. Provided no unrelated nvcomp errors occurred,
-   * if the checksums were successfully verified, the status will be nvcompSuccess. Otherwise,
-   * it will be nvcompErrorBadChecksum.
-   */
-  nvcompStatus_t final_status = *decomp_config.get_status();
-  if(final_status == nvcompErrorBadChecksum) {
-    throw std::runtime_error("One or more checksums were incorrect.\n");
-  }
-
-  CUDA_CHECK(cudaFree(comp_buffer));
-  CUDA_CHECK(cudaFree(res_decomp_buffer));
-
-  CUDA_CHECK(cudaStreamDestroy(stream));
+    struct cudaPointerAttributes attributes;
+    cudaPointerGetAttributes(&attributes, ptr);
+    return (attributes.devicePointer != NULL);
 }
 
 
-
-void decomp_compressed_with_manager_factory_with_checksums(
-  uint8_t* device_input_ptrs, const size_t input_buffer_len)
+// ref: https://docs.hdfgroup.org/hdf5/develop/_f_i_l_t_e_r.html
+size_t nvcomp_filter( unsigned int flags,
+                      size_t cd_nelmts,
+                      const unsigned int cd_values[],
+                      size_t nbytes,
+                      size_t *buf_size, void **buf)
 {
+  const bool input = flags & H5Z_FLAG_REVERSE;
+
   cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
   const int chunk_size = 1 << 16;
-  nvcompType_t data_type = NVCOMP_TYPE_CHAR;
+  const nvcompType_t data_type = NVCOMP_TYPE_CHAR;
+  const size_t input_buffer_len = nbytes;
 
-  int gpu_num = 0;
+  const bool input_buf_on_device = nvc_is_device_pointer(*buf);
 
-  /*
-   * For a full description of the checksum modes, see the above example. Here, the
-   * constructed manager will compute checksums on compression, but not verify them
-   * on decompression.
-   */
-  LZ4Manager nvcomp_manager{chunk_size, data_type, stream, gpu_num, ComputeAndNoVerify};
-  CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
+  fprintf(stderr,
+          "nvcomp_filter called with input=%d, is_device_pointer=%d, buf_size=%d, nbytes=%d, cd_nelmts=%d\n",
+          input,
+          input_buf_on_device,
+          *buf_size,
+          nbytes,
+          cd_nelmts);
 
-  uint8_t* comp_buffer;
-  CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
 
-  nvcomp_manager.compress(device_input_ptrs, comp_buffer, comp_config);
+  /* Input: we will decompress buf and replace, in place */
+  if (input)
+    {
+      assert(false);
+      return 0;
+    }
 
-  // Construct a new nvcomp manager from the compressed buffer.
-  // Note we could use the nvcomp_manager from above, but here we demonstrate how to create a manager
-  // for the use case where a buffer is received and the user doesn't know how it was compressed
-  // Also note, creating the manager in this way synchronizes the stream, as the compressed buffer must be read to
-  // construct the manager. This manager is configured to verify checksums on decompression if they were
-  // supplied in the compressed buffer. For a full description of the checksum modes, see the
-  // above example.
-  auto decomp_nvcomp_manager = create_manager(comp_buffer, stream, gpu_num, NoComputeAndVerifyIfPresent);
+  /* Output: we will compress buf and replace, in place */
+  else
+    {
+      CUDA_CHECK(cudaStreamCreate(&stream));
 
-  DecompressionConfig decomp_config = decomp_nvcomp_manager->configure_decompression(comp_buffer);
-  uint8_t* res_decomp_buffer;
-  CUDA_CHECK(cudaMalloc(&res_decomp_buffer, decomp_config.decomp_data_size));
+      // **buf could live anywhere - handle accordingly
+      // if its already on the device, use in place.
+      // if not,  we'll allocate a device buffer and copy the contents
+      uint8_t *device_data_to_compress = input_buf_on_device ? (uint8_t*) *buf : NULL;
 
-  decomp_nvcomp_manager->decompress(res_decomp_buffer, comp_buffer, decomp_config);
+      if (device_data_to_compress == NULL)
+        {
+          CUDA_CHECK(cudaMalloc(&device_data_to_compress, nbytes));
+          CUDA_CHECK(cudaMemcpy(device_data_to_compress, *buf, input_buffer_len, cudaMemcpyHostToDevice));
+        }
 
-  CUDA_CHECK(cudaFree(comp_buffer));
-  CUDA_CHECK(cudaFree(res_decomp_buffer));
+      LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
+      CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
 
-  CUDA_CHECK(cudaStreamSynchronize(stream));
+      uint8_t* comp_buffer;
+      CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
 
-  /*
-   * After synchronizing the stream, the nvcomp status can be checked to see if
-   * the checksums were successfully verified. Provided no unrelated nvcomp errors occurred,
-   * if the checksums were successfully verified, the status will be nvcompSuccess. Otherwise,
-   * it will be nvcompErrorBadChecksum.
-   */
-  nvcompStatus_t final_status = *decomp_config.get_status();
-  if(final_status == nvcompErrorBadChecksum) {
-    throw std::runtime_error("One or more checksums were incorrect.\n");
-  }
+      nvcomp_manager.compress(device_data_to_compress, comp_buffer, comp_config);
 
-  CUDA_CHECK(cudaStreamDestroy(stream));
+      if (!input_buf_on_device)
+        {
+          CUDA_CHECK(cudaFree(device_data_to_compress));
+        }
+
+      nbytes = nvcomp_manager.get_compressed_output_size(comp_buffer);
+
+      // make sure the compressed buffer is smaller than the input buffer, otherwise we'll need to increase buf
+      assert (nbytes <= input_buffer_len);
+      assert (nbytes <= *buf_size);
+
+      CUDA_CHECK(cudaMemcpy(*buf, comp_buffer, nbytes,
+                            input_buf_on_device ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost));
+
+      CUDA_CHECK(cudaFree(comp_buffer));
+
+      CUDA_CHECK(cudaStreamSynchronize(stream));
+
+      CUDA_CHECK(cudaStreamDestroy(stream));
+
+      return nbytes;
+    }
+
+  /*fail*/
+  return 0;
 }
