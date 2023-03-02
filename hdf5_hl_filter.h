@@ -22,9 +22,12 @@
     }                                                                     \
   } while (false)
 
-#define NVCOMP_FILTER_IDX 305;
+#define NVCOMP_FILTER_IDX 306;
 
-void register_nvcomp_filter();
+extern "C"
+{
+  void register_nvcomp_filter();
+}
 
 void decomp_compressed_with_manager_factory_example(uint8_t* input_buf, const size_t input_buffer_len);
 

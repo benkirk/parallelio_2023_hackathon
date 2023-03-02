@@ -6,6 +6,8 @@ CXX := nvc++
 CC  := nvc
 
 CPPFLAGS ?= -I$(HDF5_DIR)/include -I$(CUDA_DIR)/include -I$(NVCOMP_DIR)/include -DCOMPILE_MAIN
+CFLAGS ?= -g -fPIC
+CXXFLAGS ?= -g -fPIC
 LDFLAGS ?= -L$(CUDA_DIR)/lib64 -lcuda -lcudart -lcufile -Wl,-rpath,$(CUDA_DIR)/lib64 -L$(NVCOMP_DIR)/lib -lnvcomp -Wl,-rpath,$(NVCOMP_DIR)/lib -L$(HDF5_DIR)/lib -lhdf5 -Wl,-rpath,$(HDF5_DIR)/lib
 
 all: high_level_quickstart_example low_level_quickstart_example filter_example nvcomp_gds gds_helloworld hdf5_hl_filter trivial_filter
