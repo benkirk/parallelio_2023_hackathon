@@ -30,9 +30,9 @@
 #include <assert.h>
 #include <iostream>
 
-#include "nvcomp/lz4.hpp"
-#include "nvcomp.hpp"
-#include "nvcomp/nvcompManagerFactory.hpp"
+#include <nvcomp/lz4.hpp>
+#include <nvcomp.hpp>
+#include <nvcomp/nvcompManagerFactory.hpp>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -44,76 +44,30 @@
 
 using namespace nvcomp;
 
+// anonymous namespace for implementation details
+namespace
+{
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_CHAR = 0,      // 1B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_UCHAR = 1,     // 1B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_SHORT = 2,     // 2B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_USHORT = 3,    // 2B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_INT = 4,       // 4B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_UINT = 5,      // 4B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_LONGLONG = 6,  // 8B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_ULONGLONG = 7, // 8B
+  // nvcomp/include/nvcomp.h:  NVCOMP_TYPE_BITS = 0xff    // 1b
 
-// /**
-//  * In this example, we:
-//  *  1) compress the input data
-//  *  2) construct a new manager using the input data for demonstration purposes
-//  *  3) decompress the input data
-//  */
-// void decomp_compressed_with_manager_factory_example(uint8_t* device_input_ptrs, const size_t input_buffer_len)
-// {
-//   cudaStream_t stream;
-//   CUDA_CHECK(cudaStreamCreate(&stream));
-//
-//   const int chunk_size = 1 << 16;
-//   nvcompType_t data_type = NVCOMP_TYPE_CHAR;
-//
-//   //LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
-//   BitcompManager nvcomp_manager{data_type, 0, stream};
-//   CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
-//
-//   uint8_t* comp_buffer;
-//   CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
-//
-//   nvcomp_manager.compress(device_input_ptrs, comp_buffer, comp_config);
-//
-//   // Construct a new nvcomp manager from the compressed buffer.
-//   // Note we could use the nvcomp_manager from above, but here we demonstrate how to create a manager
-//   // for the use case where a buffer is received and the user doesn't know how it was compressed
-//   // Also note, creating the manager in this way synchronizes the stream, as the compressed buffer must be read to
-//   // construct the manager
-//   auto decomp_nvcomp_manager = create_manager(comp_buffer, stream);
-//
-//   DecompressionConfig decomp_config = decomp_nvcomp_manager->configure_decompression(comp_buffer);
-//
-//   // BSK: print uncompressed & compressed file sizes
-//   std::cout << "input_buffer_len = " << comp_config.uncompressed_buffer_size
-//             << ", compressed_buffer_len = " << decomp_nvcomp_manager->get_compressed_output_size(comp_buffer) << std::endl;
-//
-//
-//   uint8_t* res_decomp_buffer;
-//   CUDA_CHECK(cudaMalloc(&res_decomp_buffer, decomp_config.decomp_data_size));
-//
-//   decomp_nvcomp_manager->decompress(res_decomp_buffer, comp_buffer, decomp_config);
-//
-//   // Debug: compare device_input_ptrs & res_decomp_buffer
-//   {
-//     uint8_t *host_input_buffer, *host_res_buffer;
-//     CUDA_CHECK(cudaMallocHost((void**) &host_input_buffer, input_buffer_len));
-//     CUDA_CHECK(cudaMallocHost((void**) &host_res_buffer, input_buffer_len));
-//     cudaMemcpy((void*) host_input_buffer, (void*) device_input_ptrs, input_buffer_len, cudaMemcpyDeviceToHost);
-//     cudaMemcpy((void*) host_res_buffer,   (void*) res_decomp_buffer, input_buffer_len, cudaMemcpyDeviceToHost);
-//
-//     for (size_t i=0; i<input_buffer_len; i++)
-//       {
-//         //if (i % 10 == 0)
-//         //  std::cout << "host_input_buffer[" << i << "]=" << static_cast<short>(host_input_buffer[i])
-//         //            << ", host_res_buffer[" << i << "]=" << static_cast<short>(host_res_buffer[i]) << '\n';
-//         assert(host_input_buffer[i] == host_res_buffer[i]);
-//       }
-//     std::cout << "SUCCESS: decomp matches comp!!\n";
-//     CUDA_CHECK(cudaFreeHost(host_input_buffer));
-//     CUDA_CHECK(cudaFreeHost(host_res_buffer));
-//   }
-//
-//   CUDA_CHECK(cudaFree(comp_buffer));
-//   CUDA_CHECK(cudaFree(res_decomp_buffer));
-//
-//   CUDA_CHECK(cudaStreamSynchronize(stream));
-//
-//   CUDA_CHECK(cudaStreamDestroy(stream));
-// }
+  template <typename T> nvcompType_t nvcomp_data_type () { return NVCOMP_TYPE_CHAR; }
+
+  template <> nvcompType_t nvcomp_data_type<uint8_t>            () { return NVCOMP_TYPE_UCHAR; }
+  template <> nvcompType_t nvcomp_data_type<int>                () { return NVCOMP_TYPE_INT; }
+  template <> nvcompType_t nvcomp_data_type<unsigned int>       () { return NVCOMP_TYPE_UINT; }
+  template <> nvcompType_t nvcomp_data_type<long long>          () { return NVCOMP_TYPE_LONGLONG; }
+  template <> nvcompType_t nvcomp_data_type<unsigned long long> () { return NVCOMP_TYPE_ULONGLONG; }
+
+  template <> nvcompType_t nvcomp_data_type<float>  () { return NVCOMP_TYPE_INT; }
+  template <> nvcompType_t nvcomp_data_type<double> () { return NVCOMP_TYPE_LONGLONG; }
+}
 
 
 
@@ -123,6 +77,7 @@ bool nvc_is_device_pointer (const void *ptr)
     cudaPointerGetAttributes(&attributes, ptr);
     return (attributes.devicePointer != NULL);
 }
+
 
 
 // ref: https://docs.hdfgroup.org/hdf5/develop/_f_i_l_t_e_r.html
@@ -136,7 +91,7 @@ size_t nvcomp_filter( unsigned int flags,
 
   cudaStream_t stream;
   const int chunk_size = 1 << 16;
-  const nvcompType_t data_type = NVCOMP_TYPE_CHAR;
+  const nvcompType_t data_type = nvcomp_data_type<uint8_t>(); // FIXME: if we know the type...
   const size_t input_buffer_len = nbytes;
 
   fprintf(stderr,
@@ -160,17 +115,22 @@ size_t nvcomp_filter( unsigned int flags,
       // **buf could live anywhere - handle accordingly
       // if its already on the device, use in place.
       // if not,  we'll allocate a device buffer and copy the contents
-      uint8_t *device_data_to_uncompress = input_buf_on_device ? (uint8_t*) *buf : NULL;
+      uint8_t *device_data_to_uncompress = NULL;
 
-      if (device_data_to_uncompress == NULL)
+      if (input_buf_on_device)
         {
-          CUDA_CHECK(cudaMalloc(&device_data_to_uncompress, nbytes));
-          CUDA_CHECK(cudaMemcpy(device_data_to_uncompress, *buf, input_buffer_len, cudaMemcpyHostToDevice));
+          device_data_to_uncompress = (uint8_t*) *buf;
+        }
+      else
+        {
+          CUDA_CHECK(cudaMallocAsync(&device_data_to_uncompress, nbytes, stream));
+          CUDA_CHECK(cudaMemcpyAsync(device_data_to_uncompress, *buf, input_buffer_len, cudaMemcpyHostToDevice, stream));
         }
 
       // Construct a new nvcomp manager from the compressed buffer.
       // Creating the manager in this way synchronizes the stream, as the compressed buffer must be read to
       // construct the manager
+      //std::cout << " --> calling nvcomp setup\n";
       auto decomp_nvcomp_manager = create_manager(device_data_to_uncompress, stream);
 
       DecompressionConfig decomp_config = decomp_nvcomp_manager->configure_decompression(device_data_to_uncompress);
@@ -178,13 +138,15 @@ size_t nvcomp_filter( unsigned int flags,
       uint8_t* decomp_buffer;
       const size_t nbytes_uncompressed = decomp_config.decomp_data_size;
 
-      CUDA_CHECK(cudaMalloc(&decomp_buffer, nbytes_uncompressed));
+      CUDA_CHECK(cudaMallocAsync(&decomp_buffer, nbytes_uncompressed, stream));
 
+      //std::cout << " --> calling nvcomp decompress\n";
       decomp_nvcomp_manager->decompress(decomp_buffer, device_data_to_uncompress, decomp_config);
+      //std::cout << " --> nvcomp decompress done\n";
 
       if (!input_buf_on_device)
         {
-          CUDA_CHECK(cudaFree(device_data_to_uncompress));
+          CUDA_CHECK(cudaFreeAsync(device_data_to_uncompress, stream));
         }
 
       std::cout << "nbytes_uncompressed = " << nbytes_uncompressed << std::endl;
@@ -202,17 +164,18 @@ size_t nvcomp_filter( unsigned int flags,
           else
             {
               // Ben: fix this. redundant, just use decomp_buffer??
-              CUDA_CHECK(cudaFree(*buf));
-              CUDA_CHECK(cudaMalloc(buf, nbytes_uncompressed));
+              CUDA_CHECK(cudaFreeAsync(*buf, stream));
+              CUDA_CHECK(cudaMallocAsync(buf, nbytes_uncompressed, stream));
               *buf_size = nbytes_uncompressed;
             }
         }
 
       // put decomp_buffer into buf, wherever it lives
-      CUDA_CHECK(cudaMemcpy(*buf, decomp_buffer, nbytes_uncompressed,
-                            input_buf_on_device ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost));
+      CUDA_CHECK(cudaMemcpyAsync(*buf, decomp_buffer, nbytes_uncompressed,
+                                 input_buf_on_device ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost,
+                                 stream));
 
-      CUDA_CHECK(cudaFree(decomp_buffer));
+      CUDA_CHECK(cudaFreeAsync(decomp_buffer, stream));
       CUDA_CHECK(cudaStreamSynchronize(stream));
       CUDA_CHECK(cudaStreamDestroy(stream));
 
@@ -227,31 +190,38 @@ size_t nvcomp_filter( unsigned int flags,
       // **buf could live anywhere - handle accordingly
       // if its already on the device, use in place.
       // if not,  we'll allocate a device buffer and copy the contents
-      uint8_t *device_data_to_compress = input_buf_on_device ? (uint8_t*) *buf : NULL;
+      uint8_t *device_data_to_compress = NULL;
 
-      if (device_data_to_compress == NULL)
+      if (input_buf_on_device)
         {
-          CUDA_CHECK(cudaMalloc(&device_data_to_compress, nbytes));
-          CUDA_CHECK(cudaMemcpy(device_data_to_compress, *buf, nbytes, cudaMemcpyHostToDevice));
+          device_data_to_compress = (uint8_t*) *buf;
+        }
+      else
+        {
+          CUDA_CHECK(cudaMallocAsync(&device_data_to_compress, nbytes, stream));
+          CUDA_CHECK(cudaMemcpyAsync(device_data_to_compress, *buf, nbytes, cudaMemcpyHostToDevice, stream));
         }
 
       //LZ4Manager nvcomp_manager{chunk_size, data_type, stream};
-      BitcompManager nvcomp_manager{data_type, 0, stream};
+      //BitcompManager nvcomp_manager{data_type, 0, stream};
+      ZstdManager nvcomp_manager{chunk_size, /* max_batch_size = */ nbytes/chunk_size, stream};
       CompressionConfig comp_config = nvcomp_manager.configure_compression(input_buffer_len);
 
       uint8_t* comp_buffer;
-      CUDA_CHECK(cudaMalloc(&comp_buffer, comp_config.max_compressed_buffer_size));
+      CUDA_CHECK(cudaMallocAsync(&comp_buffer, comp_config.max_compressed_buffer_size, stream));
 
       nvcomp_manager.compress(device_data_to_compress, comp_buffer, comp_config);
 
       if (!input_buf_on_device)
         {
-          CUDA_CHECK(cudaFree(device_data_to_compress));
+          CUDA_CHECK(cudaFreeAsync(device_data_to_compress, stream));
         }
 
       const size_t nbytes_compressed = nvcomp_manager.get_compressed_output_size(comp_buffer);
 
-      std::cout << "nbytes (after Bitcomp compression): " << nbytes_compressed << std::endl;
+      std::cout << "nbytes (after Zstd compression): " << nbytes_compressed << std::endl
+                << " --> compression ratio: " << static_cast<float>(nbytes) / static_cast<float>(nbytes_compressed)
+                << std::endl;
 
       // make sure the compressed buffer is smaller than the input buffer, otherwise we'll need to increase buf
       //assert (nbytes <= input_buffer_len);
@@ -270,16 +240,17 @@ size_t nvcomp_filter( unsigned int flags,
           else
             {
               // Ben: fix this. redundant, just use decomp_buffer
-              CUDA_CHECK(cudaFree(*buf));
-              CUDA_CHECK(cudaMalloc(buf, nbytes_compressed));
+              CUDA_CHECK(cudaFreeAsync(*buf, stream));
+              CUDA_CHECK(cudaMallocAsync(buf, nbytes_compressed, stream));
               *buf_size = nbytes_compressed;
             }
         }
 
-      CUDA_CHECK(cudaMemcpy(*buf, comp_buffer, nbytes_compressed,
-                            input_buf_on_device ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost));
+      CUDA_CHECK(cudaMemcpyAsync(*buf, comp_buffer, nbytes_compressed,
+                                 input_buf_on_device ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost,
+                                 stream));
 
-      CUDA_CHECK(cudaFree(comp_buffer));
+      CUDA_CHECK(cudaFreeAsync(comp_buffer, stream));
 
       CUDA_CHECK(cudaStreamSynchronize(stream));
 
@@ -294,6 +265,8 @@ size_t nvcomp_filter( unsigned int flags,
 
 extern "C"
 {
+
+  __attribute__((constructor))
   void register_nvcomp_filter()
   {
   // ref: https://docs.hdfgroup.org/archive/support/HDF5/doc/RM/RM_H5Z.html
@@ -314,7 +287,7 @@ extern "C"
   /* registrer the filter */
   H5Z_class_t filter_spec;
   filter_spec.version = H5Z_CLASS_T_VERS;
-
+  std::cout << "Register nvcomp filter\n";
   filter_spec.id = NVCOMP_FILTER_IDX;
   filter_spec.name = "nvcomp filter";
   filter_spec.can_apply = NULL;
